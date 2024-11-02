@@ -458,19 +458,10 @@ end
 end
 
 Implement unit tests for this Julia code:
-# Enum for NeighborType
-@enum NeighborType begin
-    NEIGHBOR
-    POPULATION
-    ARCHIVE
-end
-
-abstract type Neighborhood{S} end
-
-struct PopulationAndNeighborhoodSelection{T} <: Selection
+struct PopulationAndNeighborhoodSelection <: Selection
     matingPoolSize::Int
     solutionIndexGenerator::Function
-    neighborhood::Neighborhood{T}
+    neighborhood::Neighborhood
     neighborhoodSelectionProbability::Float64
     selectCurrentSolution::Bool
     selectionOperator::SelectionOperator
@@ -479,26 +470,26 @@ end
 # Constructor for PopulationAndNeighborhoodSelection
 function PopulationAndNeighborhoodSelection(matingPoolSize::Int,
                                              solutionIndexGenerator::Function,
-                                             neighborhood::Neighborhood{T},
+                                             neighborhood::Neighborhood,
                                              neighborhoodSelectionProbability::Float64,
-                                             selectCurrentSolution::Bool) where T
+                                             selectCurrentSolution::Bool)
     selectionOperator = NaryRandomSelection(selectCurrentSolution ? matingPoolSize - 1 : matingPoolSize)
     return PopulationAndNeighborhoodSelection(matingPoolSize, solutionIndexGenerator, neighborhood, neighborhoodSelectionProbability, selectCurrentSolution, selectionOperator)
 end
 
 # Selection method for PopulationAndNeighborhoodSelection
-function select(selection::PopulationAndNeighborhoodSelection{T}, solutionList::Vector{T})::Vector{T} where T
+function select(selection::PopulationAndNeighborhoodSelection, solutionList::Vector{T})::Vector{T} where T
     matingPool = Vector{T}()
     randomValue = rand()
 
     if randomValue < selection.neighborhoodSelectionProbability
         # Select from neighborhood
-        neighborType = NEIGHBOR
+        neighborType = true
         neighbors = selection.neighborhood.getNeighbors(solutionList, selection.solutionIndexGenerator())
         matingPool = selection.selectionOperator.execute(neighbors, selectionOperator)
     else
         # Select from population
-        neighborType = POPULATION
+        neighborType = false
         matingPool = selection.selectionOperator.execute(solutionList, selection.selectionOperator)
     end
 
@@ -515,89 +506,312 @@ end
 ```
 ### ChatGPT Pruebas Unitarias
 ```
-### Test Setup
+using Test
 
-# Mock function for generating random solution index
+# Helper function to create a mock solution list
+function createMockSolutionList(n::Int)
+    return [createContinuousSolution(2) for i in 1:n]
+end
+
+# Mock solution index generator
 function mockSolutionIndexGenerator()
-    return 1  # Always return the first solution for simplicity
+    return 1
 end
 
-# Mock neighborhood that returns a fixed set of neighbors
-struct MockNeighborhood{T} <: Neighborhood{T}
-    getNeighborsFunc::Function
+# Mock neighborhood
+mutable struct MockNeighborhood <: Neighborhood
+    neighbors::Vector
+    function MockNeighborhood(neighbors)
+        new(neighbors)
+    end
+    function getNeighbors(self, solutionList, index)
+        return self.neighbors
+    end
 end
 
-function (n::MockNeighborhood{T}).getNeighbors(solutionList::Vector{T}, index::Int)::Vector{T} where T
-    return n.getNeighborsFunc(solutionList, index)
-end
+# Unit tests
 
-# Mock selection operator that returns a fixed set of selected solutions
-struct MockSelectionOperator <: SelectionOperator
-    executeFunc::Function
-end
-
-function (op::MockSelectionOperator).execute(solutionList::Vector{T}, selectionOperator::MockSelectionOperator)::Vector{T} where T
-    return op.executeFunc(solutionList, selectionOperator)
-end
-
-### Unit Tests
-
-# Test 1: PopulationAndNeighborhoodSelection is correctly initialized
 function populationAndNeighborhoodSelectionIsCorrectlyInitialized()
-    neighborhood = MockNeighborhood((solutionList, index) -> solutionList)
-    selection = PopulationAndNeighborhoodSelection(3, mockSolutionIndexGenerator, neighborhood, 0.5, true)
+    neighborhood = MockNeighborhood([])
+    selection = PopulationAndNeighborhoodSelection(
+        matingPoolSize = 3, 
+        solutionIndexGenerator = mockSolutionIndexGenerator,
+        neighborhood = neighborhood, 
+        neighborhoodSelectionProbability = 0.5, 
+        selectCurrentSolution = true
+    )
+
     return selection.matingPoolSize == 3 &&
+           selection.neighborhood === neighborhood &&
            selection.neighborhoodSelectionProbability == 0.5 &&
            selection.selectCurrentSolution == true
 end
 
-# Test 2: Selection from the neighborhood works correctly
-function selectingFromNeighborhoodWorksCorrectly()
-    solutionList = [1, 2, 3, 4]
-    neighborhood = MockNeighborhood((solutionList, index) -> [solutionList[1], solutionList[2]])
-    selectionOperator = MockSelectionOperator((neighbors, op) -> neighbors)
-    selection = PopulationAndNeighborhoodSelection(2, mockSolutionIndexGenerator, neighborhood, 1.0, false)
+function whenNeighborhoodSelectionProbabilityIsOneSelectFromNeighborhood()
+    neighborhood = MockNeighborhood(createMockSolutionList(2))
+    selection = PopulationAndNeighborhoodSelection(
+        matingPoolSize = 2, 
+        solutionIndexGenerator = mockSolutionIndexGenerator,
+        neighborhood = neighborhood, 
+        neighborhoodSelectionProbability = 1.0, 
+        selectCurrentSolution = false
+    )
+    
+    solutionList = createMockSolutionList(5)
     matingPool = select(selection, solutionList)
-    return isequal(matingPool, [1, 2])
+
+    return isequal(matingPool, neighborhood.neighbors)
 end
 
-# Test 3: Selection from the population works correctly
-function selectingFromPopulationWorksCorrectly()
-    solutionList = [1, 2, 3, 4]
-    neighborhood = MockNeighborhood((solutionList, index) -> [solutionList[1], solutionList[2]])
-    selectionOperator = MockSelectionOperator((population, op) -> population[1:2])
-    selection = PopulationAndNeighborhoodSelection(2, mockSolutionIndexGenerator, neighborhood, 0.0, false)
+function whenNeighborhoodSelectionProbabilityIsZeroSelectFromPopulation()
+    neighborhood = MockNeighborhood([])
+    selection = PopulationAndNeighborhoodSelection(
+        matingPoolSize = 2, 
+        solutionIndexGenerator = mockSolutionIndexGenerator,
+        neighborhood = neighborhood, 
+        neighborhoodSelectionProbability = 0.0, 
+        selectCurrentSolution = false
+    )
+    
+    solutionList = createMockSolutionList(5)
     matingPool = select(selection, solutionList)
-    return isequal(matingPool, [1, 2])
+
+    return !isequal(matingPool, neighborhood.neighbors)
 end
 
-# Test 4: Correct number of solutions are selected
-function correctMatingPoolSizeIsSelected()
-    solutionList = [1, 2, 3, 4]
-    neighborhood = MockNeighborhood((solutionList, index) -> [solutionList[1], solutionList[2]])
-    selectionOperator = MockSelectionOperator((population, op) -> population[1:2])
-    selection = PopulationAndNeighborhoodSelection(2, mockSolutionIndexGenerator, neighborhood, 0.0, false)
+function currentSolutionIsAddedToMatingPoolWhenFlagIsSet()
+    neighborhood = MockNeighborhood(createMockSolutionList(2))
+    selection = PopulationAndNeighborhoodSelection(
+        matingPoolSize = 3, 
+        solutionIndexGenerator = mockSolutionIndexGenerator,
+        neighborhood = neighborhood, 
+        neighborhoodSelectionProbability = 1.0, 
+        selectCurrentSolution = true
+    )
+
+    solutionList = createMockSolutionList(5)
     matingPool = select(selection, solutionList)
-    return length(matingPool) == 2
+
+    currentSolution = solutionList[mockSolutionIndexGenerator()]
+    return currentSolution in matingPool
 end
 
-# Test 5: Current solution is added to the mating pool
-function currentSolutionIsAddedToMatingPool()
-    solutionList = [1, 2, 3, 4]
-    neighborhood = MockNeighborhood((solutionList, index) -> [solutionList[1], solutionList[2]])
-    selectionOperator = MockSelectionOperator((population, op) -> population[1:2])
-    selection = PopulationAndNeighborhoodSelection(2, mockSolutionIndexGenerator, neighborhood, 0.0, true)
-    matingPool = select(selection, solutionList)
-    return isequal(matingPool, [1, 2, 1])  # Current solution (1) should be added
-end
-
-### Running the Tests
-
-@testset "Population and Neighborhood Selection Tests" begin
+@testset "Population and Neighborhood Selection tests" begin
     @test populationAndNeighborhoodSelectionIsCorrectlyInitialized()
-    @test selectingFromNeighborhoodWorksCorrectly()
-    @test selectingFromPopulationWorksCorrectly()
-    @test correctMatingPoolSizeIsSelected()
-    @test currentSolutionIsAddedToMatingPool()
+    @test whenNeighborhoodSelectionProbabilityIsOneSelectFromNeighborhood()
+    @test whenNeighborhoodSelectionProbabilityIsZeroSelectFromPopulation()
+    @test currentSolutionIsAddedToMatingPoolWhenFlagIsSet()
 end
+
+```
+### Gemini Pruebas Unitarias
+```
+struct PopulationAndNeighborhoodSelection <: Selection
+    matingPoolSize::Int
+    solutionIndexGenerator::Function
+    neighborhood::Neighborhood
+    neighborhoodSelectionProbability::Float64
+    selectCurrentSolution::Bool
+    selectionOperator::SelectionOperator
+end
+
+# Constructor for PopulationAndNeighborhoodSelection
+function PopulationAndNeighborhoodSelection(matingPoolSize::Int,
+                                            solutionIndexGenerator::Function,
+                                            neighborhood::Neighborhood,
+                                            neighborhoodSelectionProbability::Float64,
+                                            selectCurrentSolution::Bool)
+    selectionOperator = NaryRandomSelection(selectCurrentSolution ? matingPoolSize - 1 : matingPoolSize)
+    return PopulationAndNeighborhoodSelection(matingPoolSize, solutionIndexGenerator, neighborhood, neighborhoodSelectionProbability, selectCurrentSolution, selectionOperator)
+end
+
+# Selection method for PopulationAndNeighborhoodSelection
+function select(selection::PopulationAndNeighborhoodSelection, solutionList::Vector{T})::Vector{T} where T
+    matingPool = Vector{T}()
+    randomValue = rand()
+
+    if randomValue < selection.neighborhoodSelectionProbability
+        # Select from neighborhood
+        neighbors = selection.neighborhood.getNeighbors(solutionList, selection.solutionIndexGenerator())
+        matingPool = selection.selectionOperator.execute(neighbors, selectionOperator)
+    else
+        # Select from population
+        matingPool = selection.selectionOperator.execute(solutionList, selectionOperator)
+    end
+
+    if selection.selectCurrentSolution
+        # Add the current solution to the mating pool
+        currentSolution = solutionList[selection.solutionIndexGenerator()]
+        push!(matingPool, currentSolution)
+    end
+
+    @assert length(matingPool) == selection.matingPoolSize string("The mating pool size ", length(matingPool), " is not equal to the required size ", selection.matingPoolSize)
+
+    return matingPool
+end
+
+@testset "PopulationAndNeighborhoodSelection tests" begin
+    # Test constructor
+    matingPoolSize = 5
+    solutionIndexGenerator = () -> rand(1:10)
+    neighborhood = Neighborhood(1, 2)
+    neighborhoodSelectionProbability = 0.5
+    selectCurrentSolution = true
+    selection = PopulationAndNeighborhoodSelection(matingPoolSize, solutionIndexGenerator, neighborhood, neighborhoodSelectionProbability, selectCurrentSolution)
+
+    @test selection.matingPoolSize == matingPoolSize
+    @test selection.solutionIndexGenerator == solutionIndexGenerator
+    @test selection.neighborhood == neighborhood
+    @test selection.neighborhoodSelectionProbability == neighborhoodSelectionProbability
+    @test selection.selectCurrentSolution == selectCurrentSolution
+
+    # Test neighborhood selection
+    solutionList = [Solution(1), Solution(2), Solution(3), Solution(4), Solution(5)]
+    matingPool = select(selection, solutionList)
+
+    @test length(matingPool) == matingPoolSize
+    @test all(solution in solutionList for solution in matingPool)
+
+    # Test population selection
+    selection.neighborhoodSelectionProbability = 0.0
+    matingPool = select(selection, solutionList)
+
+    @test length(matingPool) == matingPoolSize
+    @test all(solution in solutionList for solution in matingPool)
+
+    # Test selectCurrentSolution
+    selection.neighborhoodSelectionProbability = 0.5
+    selection.selectCurrentSolution = false
+    matingPool = select(selection, solutionList)
+
+    @test length(matingPool) == matingPoolSize
+    @test !(solutionList[solutionIndexGenerator()] in matingPool)
+
+    # Test assertion for incorrect mating pool size
+    selection.matingPoolSize = 3
+    @test_throws AssertionError select(selection, solutionList)
+end
+```
+### Claude Pruebas Unitarias
+```
+using Test
+
+# Mock types and functions for testing
+struct MockSolution end
+struct MockNeighborhood <: Neighborhood
+    neighbors::Vector{MockSolution}
+end
+struct MockSelectionOperator <: SelectionOperator end
+
+function getNeighbors(neighborhood::MockNeighborhood, solutionList::Vector{MockSolution}, index::Int)
+    return neighborhood.neighbors
+end
+
+function execute(selectionOperator::MockSelectionOperator, solutionList::Vector{MockSolution}, operator::SelectionOperator)
+    return solutionList[1:2]  # Always return the first two solutions for testing
+end
+
+# Test functions
+function testConstructorInitialization()
+    matingPoolSize = 5
+    solutionIndexGenerator = () -> 1
+    neighborhood = MockNeighborhood([MockSolution() for _ in 1:3])
+    neighborhoodSelectionProbability = 0.5
+    selectCurrentSolution = true
+
+    selection = PopulationAndNeighborhoodSelection(
+        matingPoolSize,
+        solutionIndexGenerator,
+        neighborhood,
+        neighborhoodSelectionProbability,
+        selectCurrentSolution
+    )
+
+    return selection.matingPoolSize == matingPoolSize &&
+           selection.solutionIndexGenerator == solutionIndexGenerator &&
+           selection.neighborhood == neighborhood &&
+           selection.neighborhoodSelectionProbability == neighborhoodSelectionProbability &&
+           selection.selectCurrentSolution == selectCurrentSolution &&
+           selection.selectionOperator isa NaryRandomSelection
+end
+
+function testSelectFromNeighborhood()
+    matingPoolSize = 3
+    solutionIndexGenerator = () -> 1
+    neighborhood = MockNeighborhood([MockSolution() for _ in 1:5])
+    neighborhoodSelectionProbability = 1.0  # Always select from neighborhood
+    selectCurrentSolution = true
+
+    selection = PopulationAndNeighborhoodSelection(
+        matingPoolSize,
+        solutionIndexGenerator,
+        neighborhood,
+        neighborhoodSelectionProbability,
+        selectCurrentSolution
+    )
+
+    solutionList = [MockSolution() for _ in 1:10]
+    result = select(selection, solutionList)
+
+    return length(result) == matingPoolSize
+end
+
+function testSelectFromPopulation()
+    matingPoolSize = 3
+    solutionIndexGenerator = () -> 1
+    neighborhood = MockNeighborhood([MockSolution() for _ in 1:5])
+    neighborhoodSelectionProbability = 0.0  # Always select from population
+    selectCurrentSolution = true
+
+    selection = PopulationAndNeighborhoodSelection(
+        matingPoolSize,
+        solutionIndexGenerator,
+        neighborhood,
+        neighborhoodSelectionProbability,
+        selectCurrentSolution
+    )
+
+    solutionList = [MockSolution() for _ in 1:10]
+    result = select(selection, solutionList)
+
+    return length(result) == matingPoolSize
+end
+
+function testSelectCurrentSolution()
+    matingPoolSize = 3
+    solutionIndexGenerator = () -> 1
+    neighborhood = MockNeighborhood([MockSolution() for _ in 1:5])
+    neighborhoodSelectionProbability = 0.5
+    selectCurrentSolution = true
+
+    selection = PopulationAndNeighborhoodSelection(
+        matingPoolSize,
+        solutionIndexGenerator,
+        neighborhood,
+        neighborhoodSelectionProbability,
+        selectCurrentSolution
+    )
+
+    solutionList = [MockSolution() for _ in 1:10]
+    result = select(selection, solutionList)
+
+    return length(result) == matingPoolSize && result[end] == solutionList[1]
+end
+
+# Run the tests
+@testset "PopulationAndNeighborhoodSelection tests" begin
+    @test testConstructorInitialization()
+    @test testSelectFromNeighborhood()
+    @test testSelectFromPopulation()
+    @test testSelectCurrentSolution()
+end
+```
+# Resolución de problemas
+## Petición
+```
+Why am I getting this error? Population and Neighborhood Selection tests: Error During Test at /home/yomismo28/tfg/MetaJul/test/component/evolutionaryAlgorithm/selectionTest.jl:262 Test threw exception Expression: populationAndNeighborhoodSelectionIsCorrectlyInitialized() MethodError: no method matching PopulationAndNeighborhoodSelection(; matingPoolSize::Int64, solutionIndexGenerator::IntegerBoundedSequenceGenerator, neighborhood::MockNeighborhood, neighborhoodSelectionProbability::Float64, selectCurrentSolution::Bool) Closest candidates are: PopulationAndNeighborhoodSelection(::Int64, ::SequenceGenerator, ::Neighborhood, ::Float64, ::Bool, ::MetaJul.SelectionOperator) got unsupported keyword arguments "matingPoolSize", "solutionIndexGenerator", "neighborhood", "neighborhoodSelectionProbability", "selectCurrentSolution" @ MetaJul ~/tfg/MetaJul/src/component/evolutionaryAlgorithm/selection.jl:49 PopulationAndNeighborhoodSelection(::Any, ::Any, ::Any, ::Any, ::Any, ::Any) got unsupported keyword arguments "matingPoolSize", "solutionIndexGenerator", "neighborhood", "neighborhoodSelectionProbability", "selectCurrentSolution" @ MetaJul ~/tfg/MetaJul/src/component/evolutionaryAlgorithm/selection.jl:49 PopulationAndNeighborhoodSelection(::Int64, ::SequenceGenerator, ::Neighborhood, ::Float64, ::Bool) got unsupported keyword arguments "matingPoolSize", "solutionIndexGenerator", "neighborhood", "neighborhoodSelectionProbability", "selectCurrentSolution" @ MetaJul ~/tfg/MetaJul/src/component/evolutionaryAlgorithm/selection.jl:58
+```
+## ChatGPT
+```
+The error you're encountering stems from the fact that you're passing keyword arguments (`matingPoolSize`, `solutionIndexGenerator`, etc.) to the constructor of the `PopulationAndNeighborhoodSelection` struct, but the constructor isn't defined to accept keyword arguments.
 ```
