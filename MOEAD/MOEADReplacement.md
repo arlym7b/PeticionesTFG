@@ -1,4 +1,4 @@
-### Petición
+## Petición
 ```
 This is the Java class for RankingAndDensityEstimatorReplacement:
 public class RankingAndDensityEstimatorReplacement<S extends Solution<?>>
@@ -227,7 +227,7 @@ public class MOEADReplacement<S extends Solution<?>> implements Replacement<S> {
   }
 }
 ```
-### ChatGPT
+## ChatGPT
 ```
 struct MOEADReplacement{S <: Solution} <: Replacement
     matingPoolSelection::PopulationAndNeighborhoodSelection{S}
